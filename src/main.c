@@ -8,6 +8,10 @@ void print_usage() {
     printf("Usage: myapp -f <from> -t <to> [-s subject] [-b body] [-p port] [-H helo-host] <server>\n");
 }
 
+#ifdef TEST
+#define main main_exclude
+#endif
+
 int main(int argc, char *argv[]) {
     if (argc == 1) {
         print_usage();
