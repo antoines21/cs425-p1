@@ -1,6 +1,6 @@
 # Submission Report
 
-- Submission generated at 09/19/2026 at 22:21:19
+- Submission generated at 09/19/2026 at 22:26:10
 
 - Machine info: Linux runnervmlun5p 6.17.0-1022-azure #22-Ubuntu SMP Mon Jul 27 17:24:03 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
 
@@ -17,7 +17,7 @@ Post any questions on the class discussion board for help.
 
 ## README
 
-# Project X
+# Project P1 - Simple Mail Client
 - Name: Antoine Sabatier
 - Email: antoinesabatier@u.boisestate.edu
 - Class: CS425-001
@@ -1743,14 +1743,14 @@ int main(void) {
 ```
 
 ## Scripts Files
-Report generated on 09/19/2026 at 22:21:22
+Report generated on 09/19/2026 at 22:26:12
 
 
 ---
 
 ## End of Report
 
-SHA-256 Hash of the report: 171db6bed77435c2eba49f81b922f4e17edb7759c2c13d8fcba429098181e401
+SHA-256 Hash of the report: e7673b576e451b6725bf369882f1edc646b7314dcbdd9a3fc881ee2346d7493c
 
 Do not edit the generated report. Any changes will be reported as academic dishonesty
 
