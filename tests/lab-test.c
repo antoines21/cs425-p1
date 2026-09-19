@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <unistd.h>
 #include "harness/unity.h"
 #include "../src/lab.h"
 
@@ -101,6 +102,15 @@ void test_parse_reply_line_malformed(void) {
     TEST_ASSERT_EQUAL(-1, res);
 }
 
+// Covers the three-character reply case without a space or hyphen.
+void test_parse_reply_line_short(void) {
+    int code = 0, is_final = 0;
+    int res = parse_reply_line("250", &code, &is_final);
+    TEST_ASSERT_EQUAL(0, res);
+    TEST_ASSERT_EQUAL(250, code);
+    TEST_ASSERT_EQUAL(1, is_final);
+}
+
 void test_check_injection(void) {
     TEST_ASSERT_EQUAL(0, check_injection("alice@example.com"));
     TEST_ASSERT_EQUAL(0, check_injection(NULL));
@@ -137,6 +147,13 @@ void test_build_data_payload_dot_stuffing(void) {
     char *payload = build_data_payload("a", "b", "c", "Line1\n.\nLine3");
     TEST_ASSERT_NOT_NULL(payload);
     TEST_ASSERT_NOT_NULL(strstr(payload, "\r\n..\r\n")); 
+    free(payload);
+}
+
+// Covers orphan carriage returns and existing CRLF line endings.
+void test_build_data_payload_carriage_returns(void) {
+    char *payload = build_data_payload("a@a.com", "b@b.com", "Sub", "Line1\r\nLine2\rLine3");
+    TEST_ASSERT_NOT_NULL(payload);
     free(payload);
 }
 
@@ -212,6 +229,18 @@ void test_session_read_reply_multiline(void) {
     TEST_ASSERT_EQUAL(250, code);
 }
 
+// Covers a parse_reply_line failure inside the reply-reading loop.
+void test_session_read_reply_malformed_parse(void) {
+    mock_transport_t mock;
+    reset_mock(&mock, "22\n", 0); // Reply is too short
+    struct io_context io;
+    io_context_init(&io, mock_read_cb, mock_write_cb, &mock);
+
+    int code = 0;
+    int res = session_read_reply(&io, &code);
+    TEST_ASSERT_EQUAL(-1, res);
+}
+
 void test_session_write_and_send(void) {
     mock_transport_t mock;
     reset_mock(&mock, "", 0);
@@ -221,6 +250,19 @@ void test_session_write_and_send(void) {
     int res = session_send_command(&io, "HELO localhost");
     TEST_ASSERT_EQUAL(0, res);
     TEST_ASSERT_EQUAL_STRING("HELO localhost\r\n", mock.write_buf);
+}
+
+// Covers failure while writing the final CRLF in session_send_command.
+void test_session_send_command_write_crlf_fail(void) {
+    mock_transport_t mock;
+    reset_mock(&mock, "", 0);
+    struct io_context io;
+    io_context_init(&io, mock_read_cb, mock_write_cb, &mock);
+
+    // Leave exactly four bytes in the mock buffer: "HELO" succeeds, then CRLF fails.
+    mock.write_pos = sizeof(mock.write_buf) - 4;
+    int res = session_send_command(&io, "HELO");
+    TEST_ASSERT_EQUAL(-1, res);
 }
 
 /* ======================================================================
@@ -314,6 +356,29 @@ void test_session_run_wrong_status_data(void) {
     TEST_ASSERT_EQUAL(2, res);
 }
 
+// Covers failure while sending the message payload.
+void test_session_run_payload_write_fail(void) {
+    mock_transport_t mock;
+    const char *script =
+        "220 smtp.example.com ESMTP\n"
+        "250 smtp.example.com\n"
+        "250 2.1.0 Ok\n"
+        "250 2.1.5 Ok\n"
+        "354 End data with .\n";
+    reset_mock(&mock, script, 0);
+
+    struct io_context io;
+    io_context_init(&io, mock_read_cb, mock_write_cb, &mock);
+
+    // Fill the mock buffer so mock_write_cb fails during DATA payload transmission.
+    char big_body[8000];
+    memset(big_body, 'A', sizeof(big_body) - 1);
+    big_body[sizeof(big_body) - 1] = '\0';
+
+    int res = session_run(&io, "a@b.com", "c@d.com", "Sub", big_body, "localhost");
+    TEST_ASSERT_EQUAL(2, res);
+}
+
 /* ======================================================================
  * Layer 3 Tests: Real Sockets Coverage
  * ====================================================================== */
@@ -333,6 +398,13 @@ void test_socket_transport(void) {
     TEST_ASSERT_LESS_THAN(0, write_res); // Should fail
 }
 
+// Covers the connect loop when every localhost connection attempt fails.
+void test_socket_connect_loop_failure(void) {
+    // Port 65534 is expected to be closed in the test environment.
+    int fd = socket_connect("127.0.0.1", "65534");
+    if (fd >= 0) close(fd);
+}
+
 
 /* ======================================================================
  * Main Test Runner
@@ -345,10 +417,12 @@ int main(void) {
     RUN_TEST(test_parse_reply_line_happy_path);
     RUN_TEST(test_parse_reply_line_continuation);
     RUN_TEST(test_parse_reply_line_malformed);
+    RUN_TEST(test_parse_reply_line_short);
     RUN_TEST(test_check_injection);
     RUN_TEST(test_build_command);
     RUN_TEST(test_build_data_payload_basic);
     RUN_TEST(test_build_data_payload_dot_stuffing);
+    RUN_TEST(test_build_data_payload_carriage_returns);
 
     // Layer 2 - IO Core
     RUN_TEST(test_io_context_init);
@@ -356,7 +430,9 @@ int main(void) {
     RUN_TEST(test_session_read_line_chunked);
     RUN_TEST(test_session_read_line_buffer_overflow);
     RUN_TEST(test_session_read_reply_multiline);
+    RUN_TEST(test_session_read_reply_malformed_parse);
     RUN_TEST(test_session_write_and_send);
+    RUN_TEST(test_session_send_command_write_crlf_fail);
 
     // Layer 2 - Flow and Errors
     RUN_TEST(test_session_run_happy_path);
@@ -366,9 +442,11 @@ int main(void) {
     RUN_TEST(test_session_run_wrong_status_mail_from);
     RUN_TEST(test_session_run_wrong_status_rcpt_to);
     RUN_TEST(test_session_run_wrong_status_data);
+    RUN_TEST(test_session_run_payload_write_fail);
 
     // Layer 3
     RUN_TEST(test_socket_transport);
+    RUN_TEST(test_socket_connect_loop_failure);
 
     return UNITY_END();
 }

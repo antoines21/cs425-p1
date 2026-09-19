@@ -12,6 +12,9 @@
 
 int parse_reply_line(const char *line, int *code, int *is_final) {
     if (strlen(line) < 3) return -1;
+    if (line[0] < '0' || line[0] > '9' ||
+        line[1] < '0' || line[1] > '9' ||
+        line[2] < '0' || line[2] > '9') return -1;
     
     int c = (line[0]-'0')*100 + (line[1]-'0')*10 + (line[2]-'0');
     if (code) *code = c;
