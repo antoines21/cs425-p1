@@ -3,6 +3,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <netinet/in.h>
 #include "harness/unity.h"
 #include "../src/lab.h"
 
@@ -102,6 +103,30 @@ void test_parse_reply_line_malformed(void) {
     TEST_ASSERT_EQUAL(-1, res);
 }
 
+// Covers the character-bound checks for each position in the reply code.
+void test_parse_reply_line_invalid_chars(void) {
+    int code, is_final;
+
+    // The first character is not a digit.
+    TEST_ASSERT_EQUAL(-1, parse_reply_line("/50 OK", &code, &is_final));
+    TEST_ASSERT_EQUAL(-1, parse_reply_line(":50 OK", &code, &is_final));
+
+    // The second character is not a digit.
+    TEST_ASSERT_EQUAL(-1, parse_reply_line("2/0 OK", &code, &is_final));
+    TEST_ASSERT_EQUAL(-1, parse_reply_line("2:0 OK", &code, &is_final));
+
+    // The third character is not a digit.
+    TEST_ASSERT_EQUAL(-1, parse_reply_line("25/ OK", &code, &is_final));
+    TEST_ASSERT_EQUAL(-1, parse_reply_line("25: OK", &code, &is_final));
+}
+
+// Covers parsing a valid reply when the output code pointer is NULL.
+void test_parse_reply_line_null_code(void) {
+    int is_final;
+    TEST_ASSERT_EQUAL(0, parse_reply_line("250 OK", NULL, &is_final));
+    TEST_ASSERT_EQUAL(1, is_final);
+}
+
 // Covers the three-character reply case without a space or hyphen.
 void test_parse_reply_line_short(void) {
     int code = 0, is_final = 0;
@@ -148,6 +173,21 @@ void test_build_data_payload_dot_stuffing(void) {
     TEST_ASSERT_NOT_NULL(payload);
     TEST_ASSERT_NOT_NULL(strstr(payload, "\r\n..\r\n")); 
     free(payload);
+}
+
+// Covers NULL and empty subject and body values.
+void test_build_data_payload_nulls(void) {
+    // NULL body and NULL subject.
+    char *payload_without_subject = build_data_payload("a@b.com", "c@d.com", NULL, NULL);
+    TEST_ASSERT_NOT_NULL(payload_without_subject);
+    TEST_ASSERT_NULL(strstr(payload_without_subject, "Subject:"));
+    free(payload_without_subject);
+
+    // Empty subject.
+    char *payload_with_empty_subject = build_data_payload("a@b.com", "c@d.com", "", "Body");
+    TEST_ASSERT_NOT_NULL(payload_with_empty_subject);
+    TEST_ASSERT_NULL(strstr(payload_with_empty_subject, "Subject:"));
+    free(payload_with_empty_subject);
 }
 
 // Covers orphan carriage returns and existing CRLF line endings.
@@ -379,6 +419,31 @@ void test_session_run_payload_write_fail(void) {
     TEST_ASSERT_EQUAL(2, res);
 }
 
+// Covers the guaranteed payload write failure and error-path cleanup.
+void test_session_run_payload_write_fail_guaranteed(void) {
+    mock_transport_t mock;
+    const char *script =
+        "220 smtp.example.com ESMTP\n"
+        "250 smtp.example.com\n"
+        "250 2.1.0 Ok\n"
+        "250 2.1.5 Ok\n"
+        "354 End data with .\n";
+    reset_mock(&mock, script, 0);
+
+    struct io_context io;
+    io_context_init(&io, mock_read_cb, mock_write_cb, &mock);
+
+    // The 10,000-byte body must overflow the 8,192-byte mock buffer.
+    char *huge_body = malloc(10000);
+    TEST_ASSERT_NOT_NULL(huge_body);
+    memset(huge_body, 'A', 9999);
+    huge_body[9999] = '\0';
+
+    int res = session_run(&io, "a@b.com", "c@d.com", "Sub", huge_body, "localhost");
+    TEST_ASSERT_EQUAL(2, res);
+    free(huge_body);
+}
+
 /* ======================================================================
  * Layer 3 Tests: Real Sockets Coverage
  * ====================================================================== */
@@ -405,6 +470,33 @@ void test_socket_connect_loop_failure(void) {
     if (fd >= 0) close(fd);
 }
 
+// Covers a successful local socket connection.
+void test_socket_connect_success(void) {
+    int listener = socket(AF_INET, SOCK_STREAM, 0);
+    TEST_ASSERT_GREATER_OR_EQUAL(0, listener);
+
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_port = 0;
+
+    TEST_ASSERT_EQUAL(0, bind(listener, (struct sockaddr*)&addr, sizeof(addr)));
+    TEST_ASSERT_EQUAL(0, listen(listener, 1));
+
+    socklen_t len = sizeof(addr);
+    TEST_ASSERT_EQUAL(0, getsockname(listener, (struct sockaddr*)&addr, &len));
+
+    char port_str[16];
+    sprintf(port_str, "%d", ntohs(addr.sin_port));
+
+    int fd = socket_connect("127.0.0.1", port_str);
+    TEST_ASSERT_NOT_EQUAL(-1, fd);
+
+    close(fd);
+    close(listener);
+}
+
 
 /* ======================================================================
  * Main Test Runner
@@ -417,11 +509,14 @@ int main(void) {
     RUN_TEST(test_parse_reply_line_happy_path);
     RUN_TEST(test_parse_reply_line_continuation);
     RUN_TEST(test_parse_reply_line_malformed);
+    RUN_TEST(test_parse_reply_line_invalid_chars);
+    RUN_TEST(test_parse_reply_line_null_code);
     RUN_TEST(test_parse_reply_line_short);
     RUN_TEST(test_check_injection);
     RUN_TEST(test_build_command);
     RUN_TEST(test_build_data_payload_basic);
     RUN_TEST(test_build_data_payload_dot_stuffing);
+    RUN_TEST(test_build_data_payload_nulls);
     RUN_TEST(test_build_data_payload_carriage_returns);
 
     // Layer 2 - IO Core
@@ -443,10 +538,12 @@ int main(void) {
     RUN_TEST(test_session_run_wrong_status_rcpt_to);
     RUN_TEST(test_session_run_wrong_status_data);
     RUN_TEST(test_session_run_payload_write_fail);
+    RUN_TEST(test_session_run_payload_write_fail_guaranteed);
 
     // Layer 3
     RUN_TEST(test_socket_transport);
     RUN_TEST(test_socket_connect_loop_failure);
+    RUN_TEST(test_socket_connect_success);
 
     return UNITY_END();
 }
