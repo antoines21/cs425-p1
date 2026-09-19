@@ -64,7 +64,7 @@ int main(int argc, char *argv[]) {
                 cap *= 2;
                 body = realloc(body, cap);
             }
-            body[len++] = c;
+            body[len++] = (char)c;
         }
         body[len] = '\0';
         body_allocated = 1;
