@@ -42,7 +42,7 @@ int main(int argc, char *argv[]) {
     }
 
     if (optind >= argc || !from || !to) {
-        fprintf(stderr, "Erreur : Paramètres manquants.\n");
+        fprintf(stderr, "Error: missing parameters.\n");
         print_usage();
         return 1;
     }
@@ -50,7 +50,7 @@ int main(int argc, char *argv[]) {
 
     /* Task 1: Reject bare CR or LF in arguments (Injection Check) */
     if (check_injection(from) || check_injection(to) || check_injection(subject)) {
-        fprintf(stderr, "Erreur : Tentative d'injection (CR/LF détecté dans un header).\n");
+        fprintf(stderr, "Error: injection attempt (CR/LF detected in header).\n");
         return 1;
     }
 
@@ -72,7 +72,7 @@ int main(int argc, char *argv[]) {
 
     int fd = socket_connect(server, port);
     if (fd < 0) {
-        fprintf(stderr, "Erreur de connexion a %s:%s\n", server, port);
+        fprintf(stderr, "Connection error to %s:%s\n", server, port);
         if (body_allocated) free(body);
         return 2;
     }
@@ -85,5 +85,5 @@ int main(int argc, char *argv[]) {
     close(fd);
     if (body_allocated) free(body);
 
-    return status; // 0 succès, 2 erreur réseau/SMTP
+    return status; // 0 success, 2 network/SMTP error
 }

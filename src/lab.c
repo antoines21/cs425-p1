@@ -165,11 +165,11 @@ int session_send_command(struct io_context *io, const char *cmd) {
 #define CHECK_REPLY(expected, step_name) \
     do { \
         if (session_read_reply(io, &code) < 0) { \
-            fprintf(stderr, "Erreur de lecture (%s)\n", step_name); \
+            fprintf(stderr, "Read error (%s)\n", step_name); \
             goto error; \
         } \
         if (code != (expected)) { \
-            fprintf(stderr, "Erreur %s: attendu %d, reçu %d\n", step_name, (expected), code); \
+            fprintf(stderr, "Error %s: expected %d, received %d\n", step_name, (expected), code); \
             goto error; \
         } \
     } while (0)
@@ -177,7 +177,7 @@ int session_send_command(struct io_context *io, const char *cmd) {
 #define SEND_AND_CHECK(cmd_str, expected, step_name) \
     do { \
         if (session_send_command(io, cmd_str) < 0) { \
-            fprintf(stderr, "Erreur d'envoi (%s)\n", step_name); \
+            fprintf(stderr, "Write error (%s)\n", step_name); \
             goto error; \
         } \
         CHECK_REPLY(expected, step_name); \
@@ -216,7 +216,7 @@ int session_run(struct io_context *io, const char *from, const char *to, const c
 
     payload = build_data_payload(from, to, subject, body);
     if (!payload || session_write_exact(io, payload) < 0) {
-        fprintf(stderr, "Erreur lors de l'envoi du payload\n");
+        fprintf(stderr, "Error while sending payload\n");
         goto error;
     }
     free(payload);
