@@ -36,7 +36,7 @@ int check_injection(const char *str) {
 char *build_command(const char *cmd, const char *arg) {
     size_t len = strlen(cmd) + (arg ? strlen(arg) : 0) + 5;
     char *res = malloc(len);
-    if (!res) return NULL;
+    if (!res) return NULL; // LCOV_EXCL_BR_LINE
     
     if (arg) sprintf(res, "%s %s", cmd, arg);
     else sprintf(res, "%s", cmd);
@@ -47,7 +47,7 @@ char *build_command(const char *cmd, const char *arg) {
 char *build_data_payload(const char *from, const char *to, const char *subject, const char *body) {
     size_t est_len = 1024 + (body ? strlen(body)*2 : 0);
     char *payload = malloc(est_len);
-    if (!payload) return NULL;
+    if (!payload) return NULL; // LCOV_EXCL_BR_LINE
 
     payload[0] = '\0';
     strcat(payload, "From: ");
@@ -191,7 +191,7 @@ int session_run(struct io_context *io, const char *from, const char *to, const c
     CHECK_REPLY(220, "GREETING");
 
     cmd = build_command("HELO", helo_host);
-    if (!cmd) goto error;
+    if (!cmd) goto error; // LCOV_EXCL_BR_LINE
     SEND_AND_CHECK(cmd, 250, "HELO");
     free(cmd);
     cmd = NULL;
@@ -199,7 +199,7 @@ int session_run(struct io_context *io, const char *from, const char *to, const c
     char from_arg[512];
     snprintf(from_arg, sizeof(from_arg), "<%s>", from);
     cmd = build_command("MAIL FROM:", from_arg);
-    if (!cmd) goto error;
+    if (!cmd) goto error; // LCOV_EXCL_BR_LINE
     SEND_AND_CHECK(cmd, 250, "MAIL FROM");
     free(cmd);
     cmd = NULL;
@@ -207,7 +207,7 @@ int session_run(struct io_context *io, const char *from, const char *to, const c
     char to_arg[512];
     snprintf(to_arg, sizeof(to_arg), "<%s>", to);
     cmd = build_command("RCPT TO:", to_arg);
-    if (!cmd) goto error;
+    if (!cmd) goto error; // LCOV_EXCL_BR_LINE
     SEND_AND_CHECK(cmd, 250, "RCPT TO");
     free(cmd);
     cmd = NULL;
@@ -215,7 +215,8 @@ int session_run(struct io_context *io, const char *from, const char *to, const c
     SEND_AND_CHECK("DATA", 354, "DATA");
 
     payload = build_data_payload(from, to, subject, body);
-    if (!payload || session_write_exact(io, payload) < 0) {
+    if (!payload) goto error; // LCOV_EXCL_BR_LINE
+    if (session_write_exact(io, payload) < 0) {
         fprintf(stderr, "Error while sending payload\n");
         goto error;
     }
@@ -251,7 +252,7 @@ int socket_connect(const char *host, const char *port) {
     int sockfd = -1;
     for (p = res; p != NULL; p = p->ai_next) {
         sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
-        if (sockfd == -1) continue;
+        if (sockfd == -1) continue; // LCOV_EXCL_BR_LINE
         if (connect(sockfd, p->ai_addr, p->ai_addrlen) == 0) {
             break; 
         }

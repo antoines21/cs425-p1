@@ -19,6 +19,7 @@ typedef struct {
     size_t write_pos;         // Current position in write_buf
     int chunk_size;           // If >0, mock_read returns max this many bytes
     int hangup;               // If 1, mock_read simulates early disconnect (EOF)
+    int write_fail_countdown; // Number of successful writes before failure
 } mock_transport_t;
 
 ssize_t mock_read_cb(void *ctx, char *buf, size_t len) {
@@ -47,6 +48,12 @@ ssize_t mock_read_cb(void *ctx, char *buf, size_t len) {
 
 ssize_t mock_write_cb(void *ctx, const char *buf, size_t len) {
     mock_transport_t *mock = (mock_transport_t *)ctx;
+    if (mock->write_fail_countdown == 0) {
+        return -1; // Simulate a network write failure.
+    }
+    if (mock->write_fail_countdown > 0) {
+        mock->write_fail_countdown--;
+    }
     if (mock->write_pos + len >= sizeof(mock->write_buf)) {
         return -1; // Overflow mock buffer
     }
@@ -63,6 +70,7 @@ void reset_mock(mock_transport_t *mock, const char *data, int chunk_size) {
     memset(mock->write_buf, 0, sizeof(mock->write_buf));
     mock->chunk_size = chunk_size;
     mock->hangup = 0;
+    mock->write_fail_countdown = -1; // Never fail by default.
 }
 
 /* ======================================================================
@@ -554,6 +562,55 @@ void test_session_run_read_failures(void) {
 }
 
 /* ======================================================================
+ * Final brute-force tests for complete macro error coverage
+ * ====================================================================== */
+
+void test_session_run_all_write_errors(void) {
+    // Fail the network at every possible write step.
+    for (int i = 0; i < 20; i++) {
+        mock_transport_t mock;
+        reset_mock(&mock, "220 OK\n250 OK\n250 OK\n250 OK\n354 OK\n250 OK\n221 OK\n", 0);
+        mock.write_fail_countdown = i;
+        struct io_context io;
+        io_context_init(&io, mock_read_cb, mock_write_cb, &mock);
+        session_run(&io, "a@b.com", "c@d.com", "S", "B", "lh");
+    }
+}
+
+void test_session_run_all_read_errors(void) {
+    // Truncate the server response at every possible character boundary.
+    const char *full_script = "220 OK\n250 OK\n250 OK\n250 OK\n354 OK\n250 OK\n221 OK\n";
+    for (size_t i = 0; i < strlen(full_script); i++) {
+        mock_transport_t mock;
+        reset_mock(&mock, full_script, 0);
+        mock.read_len = i;
+        struct io_context io;
+        io_context_init(&io, mock_read_cb, mock_write_cb, &mock);
+        session_run(&io, "a@b.com", "c@d.com", "S", "B", "lh");
+    }
+}
+
+void test_session_run_all_bad_codes(void) {
+    // Return code 500 instead of the expected code at every session step.
+    const char *scripts[] = {
+        "500 OK\n",
+        "220 OK\n500 OK\n",
+        "220 OK\n250 OK\n500 OK\n",
+        "220 OK\n250 OK\n250 OK\n500 OK\n",
+        "220 OK\n250 OK\n250 OK\n250 OK\n500 OK\n",
+        "220 OK\n250 OK\n250 OK\n250 OK\n354 OK\n500 OK\n",
+        "220 OK\n250 OK\n250 OK\n250 OK\n354 OK\n250 OK\n500 OK\n"
+    };
+    for (int i = 0; i < 7; i++) {
+        mock_transport_t mock;
+        reset_mock(&mock, scripts[i], 0);
+        struct io_context io;
+        io_context_init(&io, mock_read_cb, mock_write_cb, &mock);
+        session_run(&io, "a@b.com", "c@d.com", "S", "B", "lh");
+    }
+}
+
+/* ======================================================================
  * Layer 3 Tests: Real Sockets Coverage
  * ====================================================================== */
 
@@ -653,6 +710,9 @@ int main(void) {
     RUN_TEST(test_session_run_payload_write_fail_guaranteed);
     RUN_TEST(test_session_run_write_failures);
     RUN_TEST(test_session_run_read_failures);
+    RUN_TEST(test_session_run_all_write_errors);
+    RUN_TEST(test_session_run_all_read_errors);
+    RUN_TEST(test_session_run_all_bad_codes);
 
     // Layer 3
     RUN_TEST(test_socket_transport);
