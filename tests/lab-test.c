@@ -120,6 +120,16 @@ void test_parse_reply_line_invalid_chars(void) {
     TEST_ASSERT_EQUAL(-1, parse_reply_line("25: OK", &code, &is_final));
 }
 
+// Covers every lower and upper character bound in the reply code.
+void test_parse_reply_line_bounds(void) {
+    int code, is_final;
+    parse_reply_line("/00 OK", &code, &is_final); // line[0] < '0'
+    parse_reply_line(":00 OK", &code, &is_final); // line[0] > '9'
+    parse_reply_line("0/0 OK", &code, &is_final); // line[1] < '0'
+    parse_reply_line("0:0 OK", &code, &is_final); // line[1] > '9'
+    parse_reply_line("00: OK", &code, &is_final); // line[2] > '9'
+}
+
 // Covers parsing a valid reply when the output code pointer is NULL.
 void test_parse_reply_line_null_code(void) {
     int is_final;
@@ -269,6 +279,14 @@ void test_session_read_reply_multiline(void) {
     TEST_ASSERT_EQUAL(250, code);
 }
 
+void test_session_read_reply_null_code(void) {
+    mock_transport_t mock;
+    reset_mock(&mock, "250 OK\n", 0);
+    struct io_context io;
+    io_context_init(&io, mock_read_cb, mock_write_cb, &mock);
+    session_read_reply(&io, NULL); // Covers the out_code == NULL branch.
+}
+
 // Covers a parse_reply_line failure inside the reply-reading loop.
 void test_session_read_reply_malformed_parse(void) {
     mock_transport_t mock;
@@ -303,6 +321,16 @@ void test_session_send_command_write_crlf_fail(void) {
     mock.write_pos = sizeof(mock.write_buf) - 4;
     int res = session_send_command(&io, "HELO");
     TEST_ASSERT_EQUAL(-1, res);
+}
+
+void test_session_send_command_crlf_fail(void) {
+    mock_transport_t mock;
+    reset_mock(&mock, "", 0);
+    struct io_context io;
+    io_context_init(&io, mock_read_cb, mock_write_cb, &mock);
+    // "HELO" is 4 bytes. Leave exactly 4 bytes of room so the CRLF write fails.
+    mock.write_pos = sizeof(mock.write_buf) - 4;
+    session_send_command(&io, "HELO");
 }
 
 /* ======================================================================
@@ -444,6 +472,87 @@ void test_session_run_payload_write_fail_guaranteed(void) {
     free(huge_body);
 }
 
+void test_session_run_write_failures(void) {
+    mock_transport_t mock;
+    struct io_context io;
+
+    // Fail the HELO write.
+    reset_mock(&mock, "220 OK\n", 0);
+    io_context_init(&io, mock_read_cb, mock_write_cb, &mock);
+    mock.write_pos = sizeof(mock.write_buf) - 2;
+    session_run(&io, "a@b.com", "c@d.com", "", "", "lh");
+
+    // Fail the MAIL FROM write.
+    reset_mock(&mock, "220 OK\n250 OK\n", 0);
+    io_context_init(&io, mock_read_cb, mock_write_cb, &mock);
+    mock.write_pos = sizeof(mock.write_buf) - strlen("HELO lh\r\n") - 2;
+    session_run(&io, "a@b.com", "c@d.com", "", "", "lh");
+
+    // Fail the RCPT TO write.
+    reset_mock(&mock, "220 OK\n250 OK\n250 OK\n", 0);
+    io_context_init(&io, mock_read_cb, mock_write_cb, &mock);
+    mock.write_pos = sizeof(mock.write_buf) - strlen("HELO lh\r\nMAIL FROM:<a@b.com>\r\n") - 2;
+    session_run(&io, "a@b.com", "c@d.com", "", "", "lh");
+
+    // Fail the DATA write.
+    reset_mock(&mock, "220 OK\n250 OK\n250 OK\n250 OK\n", 0);
+    io_context_init(&io, mock_read_cb, mock_write_cb, &mock);
+    mock.write_pos = sizeof(mock.write_buf) - strlen("HELO lh\r\nMAIL FROM:<a@b.com>\r\nRCPT TO:<c@d.com>\r\n") - 2;
+    session_run(&io, "a@b.com", "c@d.com", "", "", "lh");
+
+    // Fail the terminating dot write.
+    reset_mock(&mock, "220 OK\n250 OK\n250 OK\n250 OK\n354 OK\n", 0);
+    io_context_init(&io, mock_read_cb, mock_write_cb, &mock);
+    mock.write_pos = sizeof(mock.write_buf) - strlen("HELO lh\r\nMAIL FROM:<a@b.com>\r\nRCPT TO:<c@d.com>\r\nDATA\r\nFrom: a@b.com\r\nTo: c@d.com\r\n\r\n") - 1;
+    session_run(&io, "a@b.com", "c@d.com", "", NULL, "lh");
+
+    // Fail the QUIT write.
+    reset_mock(&mock, "220 OK\n250 OK\n250 OK\n250 OK\n354 OK\n250 OK\n", 0);
+    io_context_init(&io, mock_read_cb, mock_write_cb, &mock);
+    mock.write_pos = sizeof(mock.write_buf) - strlen("HELO lh\r\nMAIL FROM:<a@b.com>\r\nRCPT TO:<c@d.com>\r\nDATA\r\nFrom: a@b.com\r\nTo: c@d.com\r\n\r\n.\r\n") - 1;
+    session_run(&io, "a@b.com", "c@d.com", "", NULL, "lh");
+}
+
+void test_session_run_read_failures(void) {
+    mock_transport_t mock;
+    struct io_context io;
+
+    // Fail the HELO read by ending the server response early.
+    reset_mock(&mock, "220 OK\n", 0);
+    io_context_init(&io, mock_read_cb, mock_write_cb, &mock);
+    session_run(&io, "a@b.com", "c@d.com", "", "", "lh");
+
+    // Fail the MAIL FROM read.
+    reset_mock(&mock, "220 OK\n250 OK\n", 0);
+    io_context_init(&io, mock_read_cb, mock_write_cb, &mock);
+    session_run(&io, "a@b.com", "c@d.com", "", "", "lh");
+
+    // Fail the RCPT TO read.
+    reset_mock(&mock, "220 OK\n250 OK\n250 OK\n", 0);
+    io_context_init(&io, mock_read_cb, mock_write_cb, &mock);
+    session_run(&io, "a@b.com", "c@d.com", "", "", "lh");
+
+    // Fail the DATA read.
+    reset_mock(&mock, "220 OK\n250 OK\n250 OK\n250 OK\n", 0);
+    io_context_init(&io, mock_read_cb, mock_write_cb, &mock);
+    session_run(&io, "a@b.com", "c@d.com", "", "", "lh");
+
+    // Fail the terminating dot read.
+    reset_mock(&mock, "220 OK\n250 OK\n250 OK\n250 OK\n354 OK\n", 0);
+    io_context_init(&io, mock_read_cb, mock_write_cb, &mock);
+    session_run(&io, "a@b.com", "c@d.com", "", "", "lh");
+
+    // Fail the QUIT read.
+    reset_mock(&mock, "220 OK\n250 OK\n250 OK\n250 OK\n354 OK\n250 OK\n", 0);
+    io_context_init(&io, mock_read_cb, mock_write_cb, &mock);
+    session_run(&io, "a@b.com", "c@d.com", "", "", "lh");
+
+    // Fail the QUIT status check with an unexpected code.
+    reset_mock(&mock, "220 OK\n250 OK\n250 OK\n250 OK\n354 OK\n250 OK\n500 FAIL\n", 0);
+    io_context_init(&io, mock_read_cb, mock_write_cb, &mock);
+    session_run(&io, "a@b.com", "c@d.com", "", "", "lh");
+}
+
 /* ======================================================================
  * Layer 3 Tests: Real Sockets Coverage
  * ====================================================================== */
@@ -510,6 +619,7 @@ int main(void) {
     RUN_TEST(test_parse_reply_line_continuation);
     RUN_TEST(test_parse_reply_line_malformed);
     RUN_TEST(test_parse_reply_line_invalid_chars);
+    RUN_TEST(test_parse_reply_line_bounds);
     RUN_TEST(test_parse_reply_line_null_code);
     RUN_TEST(test_parse_reply_line_short);
     RUN_TEST(test_check_injection);
@@ -525,9 +635,11 @@ int main(void) {
     RUN_TEST(test_session_read_line_chunked);
     RUN_TEST(test_session_read_line_buffer_overflow);
     RUN_TEST(test_session_read_reply_multiline);
+    RUN_TEST(test_session_read_reply_null_code);
     RUN_TEST(test_session_read_reply_malformed_parse);
     RUN_TEST(test_session_write_and_send);
     RUN_TEST(test_session_send_command_write_crlf_fail);
+    RUN_TEST(test_session_send_command_crlf_fail);
 
     // Layer 2 - Flow and Errors
     RUN_TEST(test_session_run_happy_path);
@@ -539,6 +651,8 @@ int main(void) {
     RUN_TEST(test_session_run_wrong_status_data);
     RUN_TEST(test_session_run_payload_write_fail);
     RUN_TEST(test_session_run_payload_write_fail_guaranteed);
+    RUN_TEST(test_session_run_write_failures);
+    RUN_TEST(test_session_run_read_failures);
 
     // Layer 3
     RUN_TEST(test_socket_transport);
