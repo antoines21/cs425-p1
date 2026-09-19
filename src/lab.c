@@ -59,7 +59,7 @@ char *build_data_payload(const char *from, const char *to, const char *subject, 
 
     if (body) {
         char *curr = payload + strlen(payload);
-        int is_sol = 1; /* Début de ligne (Start Of Line) */
+        int is_sol = 1; /* Beginning of a line (Start Of Line) */
         for (size_t i = 0; i < strlen(body); i++) {
             if (is_sol && body[i] == '.') {
                 *curr++ = '.'; /* Dot stuffing */
@@ -158,7 +158,7 @@ int session_send_command(struct io_context *io, const char *cmd) {
     return 0;
 }
 
-/* Macro pour faciliter la vérification des réponses sans fuite de mémoire */
+/* Macro to simplify response checking without memory leaks */
 #define CHECK_REPLY(expected, step_name) \
     do { \
         if (session_read_reply(io, &code) < 0) { \

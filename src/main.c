@@ -11,7 +11,7 @@ void print_usage() {
 int main(int argc, char *argv[]) {
     if (argc == 1) {
         print_usage();
-        return 0; // Exigence : exit 0 quand lancé sans argument
+        return 0; // Requirement: exit 0 when launched without arguments
     }
 
     char *from = NULL;
@@ -44,13 +44,13 @@ int main(int argc, char *argv[]) {
     }
     char *server = argv[optind];
 
-    /* Task 1: Rejeter bare CR ou LF dans les arguments (Injection Check) */
+    /* Task 1: Reject bare CR or LF in arguments (Injection Check) */
     if (check_injection(from) || check_injection(to) || check_injection(subject)) {
         fprintf(stderr, "Erreur : Tentative d'injection (CR/LF détecté dans un header).\n");
         return 1;
     }
 
-    /* Si pas de body, lecture depuis stdin (Task 1) */
+    /* If no body is provided, read from stdin (Task 1) */
     if (!body) {
         size_t cap = 1024, len = 0;
         body = malloc(cap);
