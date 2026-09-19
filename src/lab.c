@@ -165,6 +165,7 @@ int session_send_command(struct io_context *io, const char *cmd) {
             fprintf(stderr, "Erreur de lecture (%s)\n", step_name); \
             return 2; \
         } \
+        fprintf(stderr, "SMTP <- %d (%s)\n", code, step_name); \
         if (code != (expected)) { \
             fprintf(stderr, "Erreur %s: attendu %d, reçu %d\n", step_name, (expected), code); \
             return 2; \
