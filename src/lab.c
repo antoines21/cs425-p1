@@ -163,12 +163,11 @@ int session_send_command(struct io_context *io, const char *cmd) {
     do { \
         if (session_read_reply(io, &code) < 0) { \
             fprintf(stderr, "Erreur de lecture (%s)\n", step_name); \
-            return 2; \
+            goto error; \
         } \
-        fprintf(stderr, "SMTP <- %d (%s)\n", code, step_name); \
         if (code != (expected)) { \
             fprintf(stderr, "Erreur %s: attendu %d, reçu %d\n", step_name, (expected), code); \
-            return 2; \
+            goto error; \
         } \
     } while (0)
 
@@ -176,48 +175,59 @@ int session_send_command(struct io_context *io, const char *cmd) {
     do { \
         if (session_send_command(io, cmd_str) < 0) { \
             fprintf(stderr, "Erreur d'envoi (%s)\n", step_name); \
-            return 2; \
+            goto error; \
         } \
         CHECK_REPLY(expected, step_name); \
     } while (0)
 
 int session_run(struct io_context *io, const char *from, const char *to, const char *subject, const char *body, const char *helo_host) {
     int code;
-    char *cmd;
+    char *cmd = NULL;
+    char *payload = NULL;
 
     CHECK_REPLY(220, "GREETING");
 
     cmd = build_command("HELO", helo_host);
-    if (!cmd) return 2;
+    if (!cmd) goto error;
     SEND_AND_CHECK(cmd, 250, "HELO");
     free(cmd);
+    cmd = NULL;
 
     char from_arg[512];
     snprintf(from_arg, sizeof(from_arg), "<%s>", from);
     cmd = build_command("MAIL FROM:", from_arg);
+    if (!cmd) goto error;
     SEND_AND_CHECK(cmd, 250, "MAIL FROM");
     free(cmd);
+    cmd = NULL;
 
     char to_arg[512];
     snprintf(to_arg, sizeof(to_arg), "<%s>", to);
     cmd = build_command("RCPT TO:", to_arg);
+    if (!cmd) goto error;
     SEND_AND_CHECK(cmd, 250, "RCPT TO");
     free(cmd);
+    cmd = NULL;
 
     SEND_AND_CHECK("DATA", 354, "DATA");
 
-    char *payload = build_data_payload(from, to, subject, body);
+    payload = build_data_payload(from, to, subject, body);
     if (!payload || session_write_exact(io, payload) < 0) {
-        free(payload);
         fprintf(stderr, "Erreur lors de l'envoi du payload\n");
-        return 2;
+        goto error;
     }
     free(payload);
+    payload = NULL;
 
     SEND_AND_CHECK(".", 250, "END_DATA_DOT");
     SEND_AND_CHECK("QUIT", 221, "QUIT");
 
     return 0; 
+
+error:
+    if (cmd) free(cmd);
+    if (payload) free(payload);
+    return 2;
 }
 
 
