@@ -1,4 +1,4 @@
-# Project X
+# Project P1 - Simple Mail Client
 - Name: Antoine Sabatier
 - Email: antoinesabatier@u.boisestate.edu
 - Class: CS425-001
